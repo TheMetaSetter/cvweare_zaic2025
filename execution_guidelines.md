@@ -41,6 +41,10 @@ have already completed.
    ```
 3. Monitor `runs/train_smallobj/<model>_st_iou/` for loss curves and ensure
    `weights/best.pt` appears for each model.
+4. **Kaggle 2×T4:** Set `MASTER_ADDR/PORT`, then launch with
+   `torchrun --nproc_per_node=2 train_yolo.py ...`. The scripts auto-read
+   `LOCAL_RANK` so each worker trains on a dedicated GPU while only rank 0 logs
+   to W&B and runs validation.
 
 ## 4. Evaluate with ST-IoU Pipeline
 

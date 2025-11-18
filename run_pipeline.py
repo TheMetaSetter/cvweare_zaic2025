@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import List
 
+import torch
 import yaml
 from ultralytics import YOLO
 
@@ -19,6 +21,7 @@ from augmentation.dataset import AugmentedVideoGenerator
 from callbacks.wandb_logging import attach_wandb_logging
 from evaluation.st_iou_pipeline import STIouPipeline, TrackerConfig
 from export_to_yolo import SourceSpec, TileConfig, YOLODatasetExporter
+from utils.distributed import cleanup_distributed_environment, setup_distributed_environment
 
 
 class ExperimentPipeline:
@@ -27,16 +30,19 @@ class ExperimentPipeline:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.class_map = self._load_class_map(Path(args.data_config))
+        self.rank = int(os.environ.get("RANK", "0"))
+        self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        self.is_distributed = self.world_size > 1
 
     def run(self) -> None:
         stages = set(self.args.stages)
-        if "augment" in stages:
+        if "augment" in stages and self._should_run_stage("augment"):
             self._generate_augmented_data()
-        if "export" in stages:
+        if "export" in stages and self._should_run_stage("export"):
             self._export_to_yolo()
         if "train" in stages:
             self._train_models()
-        if "evaluate" in stages:
+        if "evaluate" in stages and self._should_run_stage("evaluate"):
             self._run_evaluation()
 
     def _generate_augmented_data(self) -> None:
@@ -86,34 +92,47 @@ class ExperimentPipeline:
         val_exporter.export_sources([SourceSpec(self.args.val_samples, self.args.val_annotations)])
 
     def _train_models(self) -> None:
-        print("[STAGE] Training YOLO models...")
-        for weights in self.args.weights:
-            model = YOLO(weights)
-            run_name = f"{Path(weights).stem}_{self.args.name_suffix}"
-            wandb_run = None
-            if getattr(self.args, "log_wandb", False):
-                wandb_run = attach_wandb_logging(
-                    model,
-                    project=self.args.wandb_project,
-                    run_name=f"{self.args.wandb_run_prefix}-{run_name}",
-                    offline=self.args.wandb_offline,
+        if self.rank == 0:
+            print("[STAGE] Training YOLO models...")
+        rank, local_rank, _, is_distributed = setup_distributed_environment()
+        device_arg = str(local_rank) if is_distributed else self.args.device
+        try:
+            for weights in self.args.weights:
+                model = YOLO(weights)
+                run_name = f"{Path(weights).stem}_{self.args.name_suffix}"
+                wandb_run = None
+                if getattr(self.args, "log_wandb", False):
+                    wandb_run = attach_wandb_logging(
+                        model,
+                        project=self.args.wandb_project,
+                        run_name=f"{self.args.wandb_run_prefix}-{run_name}",
+                        offline=self.args.wandb_offline,
+                        rank=rank,
+                    )
+                if rank == 0:
+                    print(f"[TRAIN] {run_name} → imgsz={self.args.imgsz}, epochs={self.args.epochs}")
+                model.train(
+                    data=str(self.args.data_config),
+                    cfg=str(self.args.hyp_config),
+                    imgsz=self.args.imgsz,
+                    epochs=self.args.epochs,
+                    batch=self.args.batch,
+                    device=device_arg,
+                    project=str(self.args.project),
+                    name=run_name,
+                    close_mosaic=self.args.close_mosaic,
+                    val=True,
                 )
-            model.train(
-                data=str(self.args.data_config),
-                cfg=str(self.args.hyp_config),
-                imgsz=self.args.imgsz,
-                epochs=self.args.epochs,
-                batch=self.args.batch,
-                device=self.args.device,
-                project=str(self.args.project),
-                name=run_name,
-                close_mosaic=self.args.close_mosaic,
-                val=True,
-            )
-            metrics = model.val(data=str(self.args.data_config), imgsz=self.args.imgsz, device=self.args.device)
-            print(f"[VAL] {run_name}: mAP50-95={metrics.box.map:.4f}")
-            if wandb_run is not None:
-                wandb_run.finish()
+                if is_distributed:
+                    torch.distributed.barrier()
+                if rank == 0:
+                    metrics = model.val(data=str(self.args.data_config), imgsz=self.args.imgsz, device=device_arg)
+                    print(f"[VAL] {run_name}: mAP50-95={metrics.box.map:.4f}")
+                    if wandb_run is not None:
+                        wandb_run.finish()
+        finally:
+            if is_distributed:
+                cleanup_distributed_environment()
 
     def _run_evaluation(self) -> None:
         print("[STAGE] Running ST-IoU evaluation...")
@@ -157,6 +176,14 @@ class ExperimentPipeline:
         if preset == "aggressive":
             return get_aggressive_config()
         return get_default_config()
+
+    def _should_run_stage(self, stage_name: str) -> bool:
+        """Skip non-training stages on non-zero ranks so torchrun does not duplicate work."""
+        if stage_name == "train":
+            return True
+        if not self.is_distributed:
+            return True
+        return self.rank == 0
 
     @staticmethod
     def _load_class_map(data_yaml: Path):

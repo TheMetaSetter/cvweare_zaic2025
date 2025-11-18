@@ -67,3 +67,24 @@ python train_yolo.py \
 Remember to replace <your_suffix> with an appropriate value.
 
 - If you have [Wandb](https://wandb.ai/site/) account, you can login using your API key to save logs and metrics on Wandb platform, which is recommended.
+
+## Distributed training on Kaggle (2×T4)
+
+- Kaggle notebooks expose two T4 GPUs; launch PyTorch DDP with `torchrun` so each worker receives one card:
+
+```bash
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=29500  # pick a free port inside the notebook
+torchrun --nproc_per_node=2 train_yolo.py \
+    --weights yolo11n.pt yolo11s.pt \
+    --data configs/yolo_data.yaml \
+    --cfg configs/yolo_hyp_small_objects.yaml \
+    --imgsz 960 --epochs 200 --batch 16 \
+    --device 0  # value ignored once LOCAL_RANK is injected by torchrun
+```
+
+- `train_yolo.py` and `run_pipeline.py` now:
+  - read `RANK/LOCAL_RANK/WORLD_SIZE` from `torchrun` to initialize `torch.distributed`,
+  - pin each worker to a unique GPU (`torch.cuda.set_device(local_rank)`),
+  - limit logging, evaluation, and W&B uploads to rank 0.
+- When launching the full pipeline under `torchrun`, only the training stage runs on every rank; augment/export/eval execute once because non-zero ranks skip those stages.
