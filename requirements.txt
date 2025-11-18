@@ -1,0 +1,12 @@
+# Core dependencies
+numpy>=1.21.0
+opencv-python>=4.5.0
+torch>=1.9.0
+torchvision>=0.10.0
+
+# Data handling
+Pillow>=8.0.0
+
+# Optional dependencies
+matplotlib>=3.3.0  # for visualization
+tqdm>=4.60.0  # for progress bars
