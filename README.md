@@ -66,4 +66,4 @@ python train_yolo.py \
 ```
 Remember to replace <your_suffix> with an appropriate value.
 
-- If you have Wandb account, you can login using your API key to save logs and metrics on Wandb platform, which is recommended.
+- If you have [Wandb](https://wandb.ai/site/) account, you can login using your API key to save logs and metrics on Wandb platform, which is recommended.
