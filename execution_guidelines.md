@@ -27,8 +27,7 @@ have already completed.
        --split train --tile-small-objects
    ```
 2. Repeat for validation without augmented samples (omit the second `--source`, but keep `--data-config`).
-3. Verify `data/yolo_dataset/images/{train,val}` and `labels/{train,val}` exist
-   and contain the same number of files.
+3. Verify `data/yolo_dataset/images/{train,val}` and `labels/{train,val}` exist and contain the same number of files.
 
 ## 3. Fine-Tune YOLO11n/s
 
