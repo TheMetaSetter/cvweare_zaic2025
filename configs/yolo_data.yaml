@@ -1,0 +1,15 @@
+# Data definition for YOLO fine-tuning on exported drone frames.
+# Assumes export_to_yolo.py wrote images/ and labels/ inside data/yolo_dataset.
+path: data/yolo_dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: Backpack
+  1: Jacket
+  2: Laptop
+  3: Lifering
+  4: MobilePhone
+  5: Person1
+  6: WaterBottle

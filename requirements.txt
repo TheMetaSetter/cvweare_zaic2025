@@ -10,3 +10,10 @@ Pillow>=8.0.0
 # Optional dependencies
 matplotlib>=3.3.0  # for visualization
 tqdm>=4.60.0  # for progress bars
+wandb>=0.16.0  # optional Weights & Biases logging
+
+# YOLO11 training / evaluation
+ultralytics>=8.0.0
+
+# For Jupyter notebooks
+ipykernel==7.1.0

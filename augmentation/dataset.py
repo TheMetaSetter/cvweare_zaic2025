@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import AugmentationConfig, get_default_config
 from .video_augmenter import VideoAugmenter
+from .refbank import build_augmented_ref_bank
 
 
 class DroneVideoDataset(Dataset):
@@ -44,15 +45,21 @@ class DroneVideoDataset(Dataset):
         self.load_full_video = load_full_video  # Load full vid or only frames with bbox?
         self.sample_rate = sample_rate
         self.max_frames = max_frames
+        self.ref_bank = None
         
         # Load annotations
         with open(annotations_path, 'r') as f:
             self.annotations = json.load(f)
         
+        # Build augmented reference bank if assets exist (copy-paste stage)
+        ref_bank_root = self.data_dir.parent / 'augmented_ref_img'
+        if ref_bank_root.exists():
+            self.ref_bank = build_augmented_ref_bank(ref_bank_root)
+        
         # Setup augmenter
         if augment: # If want to augment
             self.aug_config = aug_config if aug_config is not None else get_default_config()
-            self.augmenter = VideoAugmenter(self.aug_config)
+            self.augmenter = VideoAugmenter(self.aug_config, ref_bank=self.ref_bank)
         else:
             self.aug_config = None
             self.augmenter = None
@@ -89,7 +96,8 @@ class DroneVideoDataset(Dataset):
     
     def __len__(self) -> int:
         """
-        If augment=True, return len * augment_multiplier.
+        Virtual length expands to (num videos * augment_multiplier) so DataLoader
+        can iterate through each synthetic copy deterministically.
         """
         base_len = len(self.samples)
         if self.augment:
@@ -98,16 +106,15 @@ class DroneVideoDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
-        Load and augment a video sample.
+        Load and optionally augment one video clip.
         
-        Returns:
-            Dict with keys:
-                - video_id: str
-                - frames: List[np.ndarray] (BGR format)
-                - bboxes: List[Dict] with keys 'frame', 'x1', 'y1', 'x2', 'y2'
-                - is_augmented: bool
+        Dataset contract (per AGENTS.md): callers receive raw/augmented frames,
+        YOLO-space bboxes, original frame indices, and an `is_augmented` flag so
+        later stages know whether copy-paste or other heavy transforms ran.
         """
-        # Map idx to base sample
+        # idx is split into "which video" (base_idx) and "which augmentation
+        # replica" (aug_idx). This mirrors the virtual length logic above and
+        # lets us retry augmentation without touching other videos.
         if self.augment:
             base_idx = idx % len(self.samples)
             aug_idx = idx // len(self.samples)
@@ -117,7 +124,9 @@ class DroneVideoDataset(Dataset):
         
         sample = self.samples[base_idx]
         
-        # Load video frames
+        # Only pull frames we actually need downstream: either the entire clip
+        # (load_full_video=True) or the tightest bbox-covered span. This keeps
+        # RAM predictable so later YOLO export stages can batch many videos.
         frames, frame_indices = self._load_video_frames(
             sample['video_path'],
             sample['bboxes']
@@ -127,13 +136,21 @@ class DroneVideoDataset(Dataset):
         bboxes = [bbox for bbox in sample['bboxes'] 
                  if bbox['frame'] in frame_indices]
         
-        # Apply augmentation
+        # Apply augmentation copy when aug_idx>0; aug_idx==0 always returns the
+        # unmodified clip so training sees the original distribution each epoch.
         if self.augment and aug_idx > 0:
             # Augment a frame and check if the output frame and its bbox are valid or not
-            frames, bboxes, is_valid = self.augmenter.augment_video_clip(frames, bboxes)
+            frames, bboxes, is_valid = self.augmenter.augment_video_clip(
+                frames,
+                bboxes,
+                frame_indices=frame_indices,
+                video_id=sample['video_id']
+            )
             
             # If augmentation is invalid, retry with another sample
             if not is_valid:
+                # Returning the raw clip here keeps the sample count stable and
+                # avoids poisoning YOLO training with broken boxes.
                 # Fallback: return original
                 frames, frame_indices = self._load_video_frames(
                     sample['video_path'],
@@ -256,7 +273,9 @@ class AugmentedVideoGenerator:
         
         # Setup augmenter
         self.aug_config = aug_config if aug_config is not None else get_default_config()
-        self.augmenter = VideoAugmenter(self.aug_config)
+        ref_bank_root = self.data_dir.parent / 'augmented_ref_img'
+        self.ref_bank = build_augmented_ref_bank(ref_bank_root) if ref_bank_root.exists() else None
+        self.augmenter = VideoAugmenter(self.aug_config, ref_bank=self.ref_bank)
     
     def generate_augmented_dataset(self, start_from_idx: int = 0, skip_existing: bool = True):
         """
@@ -328,7 +347,10 @@ class AugmentedVideoGenerator:
                 
                 # Augment
                 aug_frames, aug_bboxes, is_valid = self.augmenter.augment_video_clip(
-                    frames, sample_bboxes
+                    frames,
+                    sample_bboxes,
+                    frame_indices=frame_indices,
+                    video_id=video_id
                 )
                 
                 if not is_valid:
@@ -462,5 +484,3 @@ class AugmentedVideoGenerator:
             out.write(frame)
         
         out.release()
-
-

@@ -5,12 +5,13 @@ Core module cho augmentation của drone video frames.
 
 import numpy as np
 import cv2
-import random
+from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 
 from .config import AugmentationConfig, SpatialAugmentConfig, PixelAugmentConfig, TemporalConfig
 from . import bbox_utils
+from .refbank import build_augmented_ref_bank, sample_folder_to_ref_key
 
 
 @dataclass
@@ -58,13 +59,24 @@ class VideoAugmenter:
     Main class cho video frame augmentation với temporal consistency.
     """
     
-    def __init__(self, config: AugmentationConfig):
+    def __init__(self, 
+                 config: AugmentationConfig,
+                 ref_bank_root: Optional[str] = None,
+                 ref_bank: Optional[Dict[str, List[Path]]] = None):
         """
         Args:
             config: Augmentation configuration
+            ref_bank_root: Optional path tới augmented_ref_img để auto-build bank
+            ref_bank: Optional pre-built reference bank (takes precedence over root)
         """
         self.config = config
         self.rng = np.random.RandomState(config.seed)
+        self.ref_bank: Optional[Dict[str, List[Path]]] = ref_bank
+        if self.ref_bank is None and ref_bank_root is not None:
+            root_path = Path(ref_bank_root)
+            if root_path.exists():
+                self.ref_bank = build_augmented_ref_bank(root_path)
+        self._current_frame_indices: Optional[List[int]] = None
     
     # Các hàm _sample dùng để sample parameter cụ thể cho augmentation dựa vào config mà người dùng đưa.
     def _sample_spatial_transforms(self, 
@@ -223,7 +235,11 @@ class VideoAugmenter:
     
     def augment_video_clip(self,
                           frames: List[np.ndarray],
-                          bboxes: List[Dict[str, Any]]) -> Tuple[List[np.ndarray], List[Dict[str, Any]], bool]:
+                          bboxes: List[Dict[str, Any]],
+                          frame_indices: Optional[List[int]] = None,
+                          video_id: Optional[str] = None,
+                          ref_bank: Optional[Dict[str, List[Path]]] = None
+                          ) -> Tuple[List[np.ndarray], List[Dict[str, Any]], bool]:
         """
         Augment một video clip với temporal consistency.
         
@@ -231,6 +247,9 @@ class VideoAugmenter:
             frames: List of frames (numpy arrays, BGR format)
             bboxes: List of bounding boxes tương ứng với frames có object
                     Format: {'frame': frame_idx, 'x1', 'y1', 'x2', 'y2'}
+            frame_indices: Frame numbers mapping 1-1 với frames list
+            video_id: Sample/video folder name cho class_key mapping
+            ref_bank: Optional override copy-paste reference bank
         
         Returns:
             augmented_frames: List of augmented frames
@@ -242,32 +261,53 @@ class VideoAugmenter:
         
         num_frames = len(frames)
         img_height, img_width = frames[0].shape[:2]
-        
-        # Sample transforms
-        spatial_state = self._sample_spatial_transforms(img_width, img_height, num_frames)
-        pixel_state = self._sample_pixel_transforms(num_frames)
-        
-        # Merge states
-        state = self._merge_states(spatial_state, pixel_state)
-        
-        # Apply augmentation
-        augmented_frames = []
-        augmented_bboxes = []
-        
-        for i, frame in enumerate(frames):
-            aug_frame = self._apply_frame_augmentation(frame, state, i)
-            augmented_frames.append(aug_frame)
-        
-        # Transform bboxes
-        for bbox in bboxes:
-            aug_bbox = self._transform_bbox(bbox, state, img_width, img_height)
-            if aug_bbox is not None:
-                augmented_bboxes.append(aug_bbox)
-        
-        # Validate augmentation
-        is_valid = self._validate_augmentation(bboxes, augmented_bboxes)
-        
-        return augmented_frames, augmented_bboxes, is_valid
+        if frame_indices is None or len(frame_indices) != num_frames:
+            frame_indices = list(range(num_frames))
+        self._current_frame_indices = frame_indices
+        try:
+            # Sample transforms
+            spatial_state = self._sample_spatial_transforms(img_width, img_height, num_frames)
+            pixel_state = self._sample_pixel_transforms(num_frames)
+            
+            # Merge states
+            state = self._merge_states(spatial_state, pixel_state)
+            
+            # Apply augmentation
+            augmented_frames = []
+            augmented_bboxes = []
+            
+            for i, frame in enumerate(frames):
+                aug_frame = self._apply_frame_augmentation(frame, state, i)
+                augmented_frames.append(aug_frame)
+            
+            paste_bboxes: List[Dict[str, Any]] = []
+            active_ref_bank = ref_bank if ref_bank is not None else self.ref_bank
+            class_key = None
+            if video_id is not None and active_ref_bank:
+                class_key = sample_folder_to_ref_key(video_id, active_ref_bank)
+            if class_key and class_key in active_ref_bank:
+                augmented_frames, paste_bboxes, _ = self._apply_copy_paste(
+                    augmented_frames,
+                    bboxes,
+                    class_key,
+                    active_ref_bank,
+                    self.config.copy_paste
+                )
+            
+            # Transform bboxes
+            for bbox in bboxes:
+                aug_bbox = self._transform_bbox(bbox, state, img_width, img_height)
+                if aug_bbox is not None:
+                    augmented_bboxes.append(aug_bbox)
+                    
+            augmented_bboxes += paste_bboxes
+            
+            # Validate augmentation
+            is_valid = self._validate_augmentation(bboxes, augmented_bboxes)
+            
+            return augmented_frames, augmented_bboxes, is_valid
+        finally:
+            self._current_frame_indices = None
     
     def _merge_states(self, spatial: AugmentationState, pixel: AugmentationState) -> AugmentationState:
         """Merge spatial và pixel states."""
@@ -395,6 +435,157 @@ class VideoAugmenter:
                                          state.motion_blur_angle)
         
         return img
+    
+    # Applies copy-paste tubelets once frames are in final spatial space so YOLO sees extra small objects.
+    # This step explicitly targets tiny-object recall: we borrow high-quality PNGs
+    # from the reference bank, paste them consistently across frames (tubelets),
+    # and only do it after spatial transforms so pasted pixels match YOLO's view.
+    def _apply_copy_paste(
+        self,
+        frames: List[np.ndarray],
+        bboxes: List[dict],
+        class_key: str,
+        ref_bank: Dict[str, List[Path]],
+        cfg
+    ) -> Tuple[List[np.ndarray], List[dict], bool]:
+        """
+        Paste one or more reference objects (tubelets) onto the video frames.
+
+        Called after every spatial warp so pasted pixels already live in final
+        coordinates; this avoids double-transforming bboxes and keeps copy-paste
+        additive. We return the mutated frames plus the extra bboxes so YOLO
+        sees more tiny-object examples for the same context.
+
+        Args and Returns follow the dataset contract so downstream exporters can
+        merge paste-generated boxes with transformed GT boxes without further
+        bookkeeping.
+        """
+        # Copy-paste injects extra objects for classes with few examples so YOLO sees varied poses.
+        # We run it after spatial transforms so pasted pixels already match the final geometry,
+        # and we keep tubelets (same crop across frames) to maintain temporal consistency.
+        if len(frames) == 0:
+            return frames, [], False
+        if cfg is None or not getattr(cfg, "enabled", False):
+            return frames, [], False
+        if not ref_bank or class_key not in ref_bank:
+            return frames, [], False
+        ref_paths = ref_bank.get(class_key, [])
+        if len(ref_paths) == 0:
+            return frames, [], False
+        if self.rng.rand() > cfg.prob:
+            return frames, [], False
+        max_objects = min(cfg.max_objects, len(ref_paths))
+        if max_objects <= 0:
+            return frames, [], False
+        
+        frame_h, frame_w = frames[0].shape[:2]
+        # frame_numbers map each in-memory frame to its original video index for bbox bookkeeping.
+        frame_numbers = getattr(self, "_current_frame_indices", None)
+        if frame_numbers is None or len(frame_numbers) != len(frames):
+            frame_numbers = list(range(len(frames)))
+        
+        # Decide how many tubelets to paste (up to max_objects) and sample the templates.
+        num_objects = self.rng.randint(1, max_objects + 1)
+        sample_indices = self.rng.choice(len(ref_paths), size=num_objects, replace=False)
+        
+        new_frames = frames
+        new_bboxes: List[dict] = []
+        did_paste = False
+        jitter = max(0.0, float(getattr(cfg, "jitter", 0.0)))
+        min_scale, max_scale = cfg.scale_range
+        if max_scale < min_scale:
+            min_scale, max_scale = max_scale, min_scale
+        min_scale = max(min_scale, 1e-3)
+        max_scale = max(max_scale, min_scale)
+        
+        for idx in sample_indices:
+            tpl_path = ref_paths[int(idx)]
+            template = cv2.imread(str(tpl_path), cv2.IMREAD_UNCHANGED)
+            if template is None:
+                continue
+            if template.ndim == 2:
+                template = cv2.cvtColor(template, cv2.COLOR_GRAY2BGRA)
+            if template.shape[2] == 3:
+                # Some PNGs ship without alpha; assume fully opaque so blending still works.
+                alpha_channel = np.full(template.shape[:2], 255, dtype=np.uint8)
+                template = np.dstack((template, alpha_channel))
+            elif template.shape[2] != 4:
+                continue
+            
+            obj_h, obj_w = template.shape[:2]
+            if obj_h == 0 or obj_w == 0:
+                continue
+            
+            # Scale relative to object size but clamp so the crop always fits in the frame.
+            # This guarantees bbox validity even when we borrow very large crops.
+            scale = float(self.rng.uniform(min_scale, max_scale))
+            max_scale_fit = min(frame_w / obj_w, frame_h / obj_h)
+            if max_scale_fit <= 0:
+                continue
+            scale = min(scale, max_scale_fit)
+            new_w = max(1, int(round(obj_w * scale)))
+            new_h = max(1, int(round(obj_h * scale)))
+            interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+            tpl_resized = cv2.resize(template, (new_w, new_h), interpolation=interpolation)
+            
+            max_x1 = frame_w - new_w
+            max_y1 = frame_h - new_h
+            if max_x1 < 0 or max_y1 < 0:
+                continue
+            # Determine a single base location so the tubelet appears as a coherent track.
+            base_x1 = int(self.rng.randint(0, max_x1 + 1)) if max_x1 > 0 else 0
+            base_y1 = int(self.rng.randint(0, max_y1 + 1)) if max_y1 > 0 else 0
+            
+            alpha = tpl_resized[:, :, 3].astype(np.float32) / 255.0
+            if float(alpha.max()) == 0.0:
+                continue
+            alpha_3c = alpha[..., None]
+            color = tpl_resized[:, :, :3].astype(np.float32)
+            
+            object_pasted = False
+            # Jitter per frame creates tiny motion so the pasted tubelet feels real
+            # without drifting off-screen; this mimics real drone motion for ST-IoU.
+            for frame_idx, (frame, frame_number) in enumerate(zip(new_frames, frame_numbers)):
+                dx = int(round(jitter * frame_w * self.rng.uniform(-1.0, 1.0))) if jitter > 0 else 0
+                dy = int(round(jitter * frame_h * self.rng.uniform(-1.0, 1.0))) if jitter > 0 else 0
+                paste_x1 = base_x1 + dx
+                paste_y1 = base_y1 + dy
+                # Clamp jittered spot so we never spill outside of the image bounds.
+                paste_x1 = min(max(paste_x1, 0), max_x1)
+                paste_y1 = min(max(paste_y1, 0), max_y1)
+                
+                paste_x2 = paste_x1 + new_w
+                paste_y2 = paste_y1 + new_h
+                
+                # Blend with alpha so synthetic pixels respect the reference mask
+                # and we never introduce hard seams that would confuse YOLO.
+                roi = frame[paste_y1:paste_y2, paste_x1:paste_x2].astype(np.float32)
+                blended = color * alpha_3c + roi * (1.0 - alpha_3c)
+                frame[paste_y1:paste_y2, paste_x1:paste_x2] = blended.astype(np.uint8)
+
+                # These coords already live in final image space, so we store them directly
+                # without piping through _transform_bbox again. Bounding boxes stay valid
+                # because we clamp the paste window above and reuse the original frame indices.
+                new_bboxes.append({
+                    'frame': int(frame_number),
+                    'x1': float(paste_x1),
+                    'y1': float(paste_y1),
+                    'x2': float(paste_x2),
+                    'y2': float(paste_y2),
+                })
+                object_pasted = True
+                did_paste = True
+            
+            # Reaching here means the tubelet stayed in-bounds for all frames;
+            # if the template never fit, we silently skip it to avoid corrupt labels.
+            if not object_pasted:
+                continue
+        
+        if not did_paste:
+            return frames, [], False
+
+        return new_frames, new_bboxes, True
+
     
     def _apply_color_jitter(self, img: np.ndarray, 
                            brightness: float,
@@ -558,4 +749,3 @@ class VideoAugmenter:
             # Ở đây ta skip check này
         
         return True
-

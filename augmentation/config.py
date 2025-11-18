@@ -38,7 +38,14 @@ class SpatialAugmentConfig:
     # Validation - drop augmented sample nếu bbox quá nhỏ hoặc bị crop quá nhiều
     min_bbox_area_ratio: float = 0.3  # so với original bbox area
     min_iou_threshold: float = 0.5  # IoU với original bbox
-
+    
+@dataclass
+class CopyPasteConfig:
+    enabled: bool = True
+    prob: float = 0.3
+    max_objects: int = 1          # number of pasted tubelets
+    jitter: float = 0.05          # motion jitter as % of frame size
+    scale_range: Tuple[float,float] = (0.3, 1.0)  # relative scale of pasted object
 
 @dataclass
 class PixelAugmentConfig:
@@ -107,9 +114,12 @@ class AugmentationConfig:
     Main augmentation configuration.
     """
     
-    spatial: SpatialAugmentConfig = field(default_factory=SpatialAugmentConfig) # TODO: Giải thích hàm field, tham số default_factory
-    pixel: PixelAugmentConfig = field(default_factory=PixelAugmentConfig)       # TODO: Giải thích hàm field, tham số default_factory
-    temporal: TemporalConfig = field(default_factory=TemporalConfig)            # TODO: Giải thích hàm field, tham số default_factory
+    # Using default_factory keeps each config block lazily instantiated so every
+    # dataset/augmenter gets its own mutable copy (critical when runs tweak params).
+    spatial: SpatialAugmentConfig = field(default_factory=SpatialAugmentConfig)
+    copy_paste: CopyPasteConfig = field(default_factory=CopyPasteConfig)
+    pixel: PixelAugmentConfig = field(default_factory=PixelAugmentConfig)
+    temporal: TemporalConfig = field(default_factory=TemporalConfig)
     
     # Global settings
     seed: Optional[int] = None      # Random seed cho reproducibility
@@ -119,7 +129,6 @@ class AugmentationConfig:
     save_augmented_video: bool = False  # True = save video, False = chỉ save frames khi cần
     output_video_fps: int = 25
     output_video_quality: int = 95      # 0-100
-
 
 # Preset configs
 def get_conservative_config() -> AugmentationConfig:
@@ -190,5 +199,4 @@ def get_default_config() -> AugmentationConfig:
     Default balanced augmentation.
     """
     return AugmentationConfig()
-
 

@@ -7,7 +7,6 @@ import numpy as np
 import cv2
 from typing import Tuple, List, Dict, Optional
 
-
 def clip_bbox(bbox: Dict[str, float], img_width: int, img_height: int) -> Optional[Dict[str, float]]:
     """
     Clip bounding box để nằm trong frame và đảm bảo hợp lệ.
@@ -260,5 +259,3 @@ def bbox_center(bbox: Dict[str, float]) -> Tuple[float, float]:
     cx = (bbox['x1'] + bbox['x2']) / 2
     cy = (bbox['y1'] + bbox['y2']) / 2
     return cx, cy
-
-

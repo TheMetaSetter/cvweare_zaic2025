@@ -63,3 +63,6 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+*draft*
+
+data
