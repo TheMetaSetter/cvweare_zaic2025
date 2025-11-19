@@ -1,7 +1,9 @@
 # CVWeAre2025 @ Zalo AI Challenge 2025
+
 This repository contains implementation for the framework our team (CVWeAre) built for the Zalo AI Challenge 2025.
 
 # Setup
+
 - Please create a Python environment using Conda or python `venv`. Recommend using `uv` package manager for speed. Refer to `requirements.txt` for compatibility.
 - Run `python download.py` to download base dataset.
 - Download and place augmented reference images folder `augmented_ref_img` inside `data/observing_unzipped/train/`.
@@ -52,6 +54,7 @@ python run_pipeline.py \
 - Verify `data/yolo_dataset/images/{train,val}` and `labels/{train,val}` exist and contain the same number of files.
 - Edit `configs/yolo_data.yaml` if paths differ, and confirm `configs/yolo_hyp_small_objects.yaml` matches your hardware limits (batch size, mosaic schedule).
 - Launch training using:
+
 ```bash
 python train_yolo.py \
     --weights yolo11n.pt \
@@ -64,6 +67,7 @@ python train_yolo.py \
     --project runs/train_smallobj_dryrun \
     --name-suffix <your_suffix>
 ```
+
 Remember to replace <your_suffix> with an appropriate value.
 
 - If you have [Wandb](https://wandb.ai/site/) account, you can login using your API key to save logs and metrics on Wandb platform, which is recommended.
