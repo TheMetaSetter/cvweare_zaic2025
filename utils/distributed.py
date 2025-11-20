@@ -29,4 +29,3 @@ def cleanup_distributed_environment() -> None:
     """Tear down the process group once the YOLO stage reaches global synchronization."""
     if dist.is_initialized():
         dist.destroy_process_group()
-

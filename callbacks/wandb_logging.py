@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -10,18 +11,33 @@ from typing import Optional
 def attach_wandb_logging(
     model, project: str, run_name: str, offline: bool = False, *, rank: int = 0
 ) -> Optional["wandb.wandb_run.Run"]:
-    """Attach W&B logging (epoch + per-step losses) to a YOLO model."""
+    """Route YOLO training metrics into W&B after Ultralytics enables its built-in callback.
+
+    The official YOLO11 workflow spins up W&B internally once `yolo settings wandb=True`
+    is set, so this helper focuses on configuring offline mode, naming, and the custom
+    per-batch callback that feeds fine-grained losses into the same run."""
 
     if rank != 0:
-        # Only rank 0 creates a run so DDP launches on Kaggle do not spawn duplicates.
+        # Keeping only rank-0 logging avoids duplicated W&B streams under torch.distributed.
         return None
 
     import wandb
-    from wandb.integration.ultralytics import add_wandb_callback
+    from ultralytics.utils import SETTINGS
 
-    mode = "offline" if offline else None
-    run = wandb.init(project=project, name=run_name, mode=mode)
-    add_wandb_callback(model, enable_model_checkpointing=True)
+    # Toggle Ultralytics' native W&B integration rather than calling the legacy
+    # wandb.integration.ultralytics hook that crashes on YOLO11 (missing RANK global).
+    SETTINGS.update({"wandb": True})
+
+    # Respect offline runs without forcing wandb.init(); Ultralytics will read these
+    # env vars when it creates the run at training start.
+    if offline:
+        os.environ.setdefault("WANDB_MODE", "offline")
+    os.environ.setdefault("WANDB_PROJECT", project)
+    os.environ.setdefault("WANDB_NAME", run_name)
+
+    # If Ultralytics already opened a run we reuse it, otherwise this stays None
+    # until training kicks off and the callback boots wandb up.
+    run = wandb.run
 
     def log_batch_loss(trainer):
         """Log loss terms for every batch to match Ultralytics' naming."""
@@ -44,9 +60,10 @@ def attach_wandb_logging(
             "batch": batch_i,
         }
 
-        # Send step-wise metrics to W&B exactly as before so existing
-        # dashboards and offline logging workflows remain unchanged.
-        wandb.log(payload, step=step)
+        # Only log when Ultralytics has brought up a W&B run; this lets dry runs
+        # or offline smoke tests skip the dependency silently.
+        if wandb.run is not None:
+            wandb.log(payload, step=step)
 
         # Also persist the same payload to a local CSV so users can draw
         # curves post-hoc even without syncing to W&B.

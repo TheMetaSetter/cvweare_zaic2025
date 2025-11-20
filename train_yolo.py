@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int, default=960, help="Training image size")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--workers", type=int, default=8, help="Number of dataloader workers per process")
     parser.add_argument("--device", type=str, default="0", help="CUDA device string or 'cpu'")
     parser.add_argument("--project", type=str, default="runs/train_smallobj", help="Ultralytics project dir")
     parser.add_argument("--name-suffix", type=str, default="st_iou", help="Suffix appended to run name")
@@ -67,11 +68,13 @@ def main() -> None:
                 imgsz=args.imgsz,
                 epochs=args.epochs,
                 batch=args.batch,
+                workers=args.workers,
                 device=device_arg,
                 project=args.project,
                 name=run_name,
                 close_mosaic=args.close_mosaic,
                 val=True,
+                cache='disk', # TODO: check if this params exists in ultralytics version
             )
             if is_distributed:
                 torch.distributed.barrier()

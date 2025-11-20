@@ -4,6 +4,7 @@
 # Hyperparameters tuned for small objects
 # Boost localization, keep augmentations gentle, and close mosaic near the end
 # so YOLO11 refines box edges for the ST-IoU pipeline.
+optimizer: SGD
 lr0: 0.005
 lrf: 0.003
 momentum: 0.937
