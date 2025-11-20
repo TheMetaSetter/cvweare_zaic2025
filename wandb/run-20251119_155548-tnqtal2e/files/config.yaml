@@ -1,0 +1,79 @@
+_wandb:
+    value:
+        cli_version: 0.21.0
+        e:
+            22tk5eq0cf9vykizak1fq0u3qzxuzaj6:
+                args:
+                    - --weights
+                    - yolo11n.pt
+                    - yolo11s.pt
+                    - --data
+                    - configs/yolo_data.yaml
+                    - --cfg
+                    - configs/yolo_hyp_small_objects.yaml
+                    - --imgsz
+                    - "960"
+                    - --epochs
+                    - "1"
+                    - --batch
+                    - "32"
+                    - --project
+                    - runs/train_smallobj_dryrun
+                    - --log-wandb
+                    - --wandb-project
+                    - runs-train_smallobj_dryrun
+                    - --wandb-run-prefix
+                    - kaggle
+                codePath: train_yolo.py
+                codePathLocal: train_yolo.py
+                cpu_count: 2
+                cpu_count_logical: 4
+                cudaVersion: "12.6"
+                disk:
+                    /:
+                        total: "8656922775552"
+                        used: "7049922576384"
+                email: nguyenanhkhoi0608@gmail.com
+                executable: /usr/bin/python3
+                git:
+                    commit: 43d706592849a9367552a9b4b4bc214efe22eae4
+                    remote: https://TheMetaSetter:@github.com/TheMetaSetter/cvweare_zaic2025.git
+                gpu: Tesla T4
+                gpu_count: 2
+                gpu_nvidia:
+                    - architecture: Turing
+                      cudaCores: 2560
+                      memoryTotal: "16106127360"
+                      name: Tesla T4
+                      uuid: GPU-50b722fd-fb11-1538-a75d-5c6de11b7089
+                    - architecture: Turing
+                      cudaCores: 2560
+                      memoryTotal: "16106127360"
+                      name: Tesla T4
+                      uuid: GPU-0ddf286d-2a07-e22d-cdf4-c9c5240a7965
+                host: 69d049cbf127
+                memory:
+                    total: "33662320640"
+                os: Linux-6.6.56+-x86_64-with-glibc2.35
+                program: /kaggle/working/cvweare_zaic2025/train_yolo.py
+                python: CPython 3.11.13
+                root: /kaggle/working/cvweare_zaic2025
+                startedAt: "2025-11-19T15:55:48.096120Z"
+                writerId: 22tk5eq0cf9vykizak1fq0u3qzxuzaj6
+        m: []
+        python_version: 3.11.13
+        t:
+            "1":
+                - 1
+                - 105
+            "2":
+                - 1
+                - 105
+            "3":
+                - 13
+            "4": 3.11.13
+            "5": 0.21.0
+            "8":
+                - 2
+            "12": 0.21.0
+            "13": linux-x86_64

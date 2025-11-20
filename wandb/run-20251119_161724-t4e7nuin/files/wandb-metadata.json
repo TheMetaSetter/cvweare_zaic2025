@@ -1,0 +1,69 @@
+{
+  "os":  "Linux-6.6.56+-x86_64-with-glibc2.35",
+  "python":  "CPython 3.11.13",
+  "startedAt":  "2025-11-19T16:17:24.958636Z",
+  "args":  [
+    "--weights",
+    "yolo11n.pt",
+    "yolo11s.pt",
+    "--data",
+    "configs/yolo_data.yaml",
+    "--cfg",
+    "configs/yolo_hyp_small_objects.yaml",
+    "--imgsz",
+    "960",
+    "--epochs",
+    "200",
+    "--batch",
+    "32",
+    "--project",
+    "runs/train_smallobj_dryrun",
+    "--log-wandb",
+    "--wandb-project",
+    "runs-train_smallobj_dryrun",
+    "--wandb-run-prefix",
+    "kaggle"
+  ],
+  "program":  "/kaggle/working/cvweare_zaic2025/train_yolo.py",
+  "codePath":  "train_yolo.py",
+  "codePathLocal":  "train_yolo.py",
+  "git":  {
+    "remote":  "https://TheMetaSetter:@github.com/TheMetaSetter/cvweare_zaic2025.git",
+    "commit":  "43d706592849a9367552a9b4b4bc214efe22eae4"
+  },
+  "email":  "nguyenanhkhoi0608@gmail.com",
+  "root":  "/kaggle/working/cvweare_zaic2025",
+  "host":  "69d049cbf127",
+  "executable":  "/usr/bin/python3",
+  "cpu_count":  2,
+  "cpu_count_logical":  4,
+  "gpu":  "Tesla T4",
+  "gpu_count":  2,
+  "disk":  {
+    "/":  {
+      "total":  "8656922775552",
+      "used":  "7049922650112"
+    }
+  },
+  "memory":  {
+    "total":  "33662320640"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "Tesla T4",
+      "memoryTotal":  "16106127360",
+      "cudaCores":  2560,
+      "architecture":  "Turing",
+      "uuid":  "GPU-50b722fd-fb11-1538-a75d-5c6de11b7089"
+    },
+    {
+      "name":  "Tesla T4",
+      "memoryTotal":  "16106127360",
+      "cudaCores":  2560,
+      "architecture":  "Turing",
+      "uuid":  "GPU-0ddf286d-2a07-e22d-cdf4-c9c5240a7965"
+    }
+  ],
+  "cudaVersion":  "12.6",
+  "writerId":  "xwqo4cxo6yyjz8p39cnam3fhqicwwdag"
+}
